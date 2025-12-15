@@ -1,0 +1,35 @@
+#!/usr/bin/env python3
+import sys
+import argparse
+import os
+
+def main():
+    parser = argparse.ArgumentParser(description='Link wasm files into a wast script.')
+    parser.add_argument('inputs', metavar='FILE', type=str, nargs='+', help='Input wasm files')
+    parser.add_argument('-o', dest='output', required=True, help='Output wast file')
+    args = parser.parse_args()
+
+    with open(args.output, 'w') as f:
+        for i, filename in enumerate(args.inputs):
+            with open(filename, 'rb') as bin_f:
+                content = bin_f.read()
+                # Escape binary content for text format string
+                hex_str = "".join([f"\\{b:02x}" for b in content])
+
+                module_name = ""
+                # Determine module name/registration based on filename
+                basename = os.path.basename(filename)
+
+                if "waml-runtime" in basename:
+                    module_name = '$runtime'
+                else:
+                    module_name = f'$m{i}'
+
+                f.write(f'(module {module_name} binary "{hex_str}")\n')
+
+                if "waml-runtime" in basename:
+                    f.write(f'(register "waml-runtime" {module_name})\n')
+
+if __name__ == "__main__":
+    main()
+

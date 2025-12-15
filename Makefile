@@ -21,18 +21,29 @@ FLAGS = 	-lexflags -ml -cflags '-w +a-4-27-37-42-44-45-70 -warn-error +a-3'
 OCB =		ocamlbuild -use-ocamlfind -no-hygiene -verbose 8 $(FLAGS) $(DIRS:%=-I %) $(PKGS:%=-pkg %)
 
 NODE =		node --experimental-wasm-gc
-WASM_BIN ?=	wasm
+WASM_BIN ?=	vendor/spec/interpreter/wasm
 
 
 # Main targets
 
-.PHONY:		default debug opt unopt
+.PHONY:		default debug opt unopt interpreter
 
 default:	opt
 debug:		unopt
 opt:		$(OPT)
 unopt:		$(UNOPT)
-all:		unopt opt test
+interpreter:	$(WASM_BIN)
+all:		unopt opt interpreter test
+
+
+# Vendor dependencies
+
+$(WASM_BIN):
+	mkdir -p vendor
+	if [ ! -d "vendor/spec" ]; then \
+		git clone https://github.com/WebAssembly/spec.git vendor/spec; \
+	fi
+	$(MAKE) -C vendor/spec/interpreter
 
 
 # Building linker
