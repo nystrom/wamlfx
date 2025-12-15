@@ -99,14 +99,6 @@ make
 ```
 in the `waml` directory should produce a binary `waml` in that directory.
 
-The build now vendors the GC-enabled Wasm reference interpreter from
-`../ivo-node/gc/interpreter`. On the first run it executes
-`dune install --prefix vendor/wasm wasm` inside that directory and points
-`ocamlbuild` at the resulting findlib package via `OCAMLPATH`. Keep that
-repository checked out next to `wamlfx` (as in the upstream layout) or set
-`WASM_SRC_DIR` to wherever the interpreter lives before running `make`.
-
-
 ### Invocation
 
 The `waml` binary is both compiler and REPL. For example:
@@ -119,34 +111,6 @@ The `waml` binary is both compiler and REPL. For example:
 * `waml -c <file.waml>` compiles the file to `<file.wasm>`.
 
 See `waml -h` for further options.
-
-## Rust Prototype (JSON AST Workflow)
-
-A Rust workspace now lives alongside the OCaml implementation. Until the lexer/parser are ported, the Rust binary consumes pre-built ASTs serialized as JSON (matching the structures in `waml-ast`). Use Cargo to run the prototype:
-
-```
-cargo run -p waml -- --ast path/to/program.json
-```
-
-Key options:
-
-* `--ast <file>` – load a JSON AST from disk.
-* `--ast-json "<json>"` – inline a JSON string that describes the AST.
-* `--stdin-ast` – read the JSON AST from standard input.
-* `-c/--compile`, `-x/--show-wasm`, `-r/--run <file>` – mirror the OCaml flags so the eventual interpreter/compiler flows have the same surface area.
-
-At the moment the CLI validates/deserializes the AST, runs the nascent type checker, and then dispatches to placeholder interpreter/compiler hooks. The Rust type checker currently understands literals, tuples, `val` bindings, and simple `exp`/`assert` declarations (including detection of illegal tuple destructuring or arithmetic on non-ints); it reports structural mismatches using the shared `TypeError` machinery. For example, if a binding attempts to match a two-field tuple pattern against a one-field tuple expression, or applies integer addition to `Text` values, the CLI surfaces the error before any interpreter/compiler work runs. This keeps the JSON-AST workflow useful while the rest of the compiler is ported.
-
-Points of note:
-
-* The Wasm code produced is self-contained with no imports except the small Waml runtime system (unless the source declares explicit imports of other Waml modules). Consequently, it can run in any Wasm environment supporting the GC proposal.
-
-* The compiler even supports a *headless* mode in which the relevant parts of the runtime system is included into each module.
-
-* That means that there is no I/O. However, a program can communicate results via module exports or run assertions.
-
-* When batch-executing, all Wasm code is itself executed via the Wasm reference interpreter, so don't expect performance miracles.
-
 
 ### Test Suite
 
