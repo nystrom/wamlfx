@@ -346,7 +346,7 @@ and check_exp' env e : T.typ =
     (try ignore (T.sub s1 s2) with T.Mismatch s ->
       error e.at "module does not match annotation, %s" s
     );
-    T.Pack s2  (* TODO: fresh names *)
+    T.Pack (T.freshen_sig s2)
 
   | LetE (ds, e1) ->
     let bs, env' = check_scope env ds in
@@ -453,7 +453,17 @@ and check_dec' pass env d : T.typ * T.var list * env =
       List.fold_left (fun env2 c ->
         let (x, ts) = c.it in
         let ts' = List.map (check_typ env') ts in
-        let t' = List.fold_right (fun tI t' -> T.Fun (tI, t', ref T.VariableArity)) ts' t in
+        let arity = List.length ts' in
+        let rec make_fun idx ts t' =
+          match ts with
+          | [] -> t'
+          | tI::ts' ->
+            let arity_ref =
+              if idx = 0 then ref (T.KnownArity arity) else ref T.VariableArity
+            in
+            T.Fun (tI, make_fun (idx + 1) ts' t', arity_ref)
+        in
+        let t' = make_fun 0 ts' t in
         c.et <- Some t';
         E.extend_val env2 x (T.Forall (bs, T.Data t'))
       ) E.empty cs
@@ -641,7 +651,7 @@ and check_mod' env m : T.sig_ =
       let su = try T.sub s2 (T.pack bs s2') with T.Mismatch s ->
         error m.at "module does not match functor parameter signature, %s" s
       in
-      T.subst_sig su s  (* TODO: fresh names *)
+      T.freshen_sig (T.subst_sig su s)
     | _ -> error m1.at "functor expected but got %s" (T.string_of_sig s1)
     )
 
@@ -651,13 +661,13 @@ and check_mod' env m : T.sig_ =
     (try ignore (T.sub s1 s2) with T.Mismatch s ->
       error m.at "module does not match annotation, %s" s
     );
-    s2  (* TODO: fresh names *)
+    T.freshen_sig s2
 
   | UnpackM (e, s) ->
     let t1 = check_exp env e in
     let s2 = check_sig env s in
     unify t1 (T.Pack s2) e.at;
-    s2  (* TODO: fresh names *)
+    T.freshen_sig s2
 
   | LetM (ds, m) ->
     let bs, env' = check_scope env ds in

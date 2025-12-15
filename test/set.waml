@@ -1,4 +1,4 @@
-;; @FAIL-V8: does not recognise (ref null (rtt _))
+;; @FAIL-V8: requires Wasm GC typed references
 
 ;; Simple Set functor
 
@@ -44,4 +44,3 @@ val s = IS.add 3 (IS.add 1 (IS.add 3 (IS.add 5 IS.empty)))
 assert IS.mem 3 s;
 assert IS.mem 5 s;
 assert ~ IS.mem 2 s;
-

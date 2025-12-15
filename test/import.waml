@@ -1,4 +1,4 @@
-;; @FAIL-V8: does not recognise (ref null (rtt _))
+;; @FAIL-V8: requires Wasm GC typed references
 
 ;; Imports
 

@@ -36,51 +36,53 @@ The compiler makes use of [most of the constructs](#under-the-hood) in the GC pr
 For example, here is a short transcript of a REPL session with [`wob -c -x`](#invocation):
 ```
 proposals/gc/waml$ ./waml -x -c
-waml 0.1 interpreter
+waml 0.2 interpreter
 > val f x = x + 7;  f 5;
 (module
-  (type $0 (func))
-  (type $1 (func (param (ref 2) (ref eq)) (result (ref eq))))
-  (type $2 (struct (field i32) (field (ref 1))))
-  (type $3 (struct (field i32)))
-  (global $0 (mut (ref null 2)) (ref.null 2))
-  (global $1 (mut i32) (i32.const 0))
-  (func $0
-    (type 0)
+  (type $0 (sub (struct (field i32))))
+  (type $1 (sub (func (param (ref 0) (ref eq)) (result (ref eq)))))
+  (type $2 (sub (func)))
+  (rec
+    (type $3 (sub (func (param (ref 4) (ref eq)) (result (ref eq)))))
+    (type $4 (sub 0 (struct (field i32) (field (ref 3)))))
+  )
+  (type $5 (sub 4 (struct (field i32) (field (ref 3)))))
+  (import "waml-runtime" "func_apply1" (func $0 (type 1)))
+  (global $0 (mut (ref null 4)) (ref.null 4))
+  (global $1 (mut (ref null i31)) (ref.null i31))
+  (func $1
+    (type 2)
     (i32.const 1)
-    (ref.func 1)
-    (rtt.canon 3)
-    (rtt.sub 2)
-    (struct.new 2)
+    (ref.func 2)
+    (struct.new 5)
     (global.set 0)
     (global.get 0)
     (ref.as_non_null)
     (i32.const 5)
-    (i31.new)
-    (call 1)
-    (ref.as_i31)
-    (i31.get_s)
+    (ref.i31)
+    (call 2)
+    (ref.cast (ref i31))
     (global.set 1)
   )
-  (func $1
-    (type 1)
+  (func $2
+    (type 3)
     (local i32)
     (local.get 1)
-    (ref.as_i31)
+    (ref.cast (ref i31))
     (i31.get_s)
     (local.set 2)
     (local.get 2)
     (i32.const 7)
     (i32.add)
-    (i31.new)
+    (ref.i31)
   )
   (export "return" (global 1))
   (export "f" (global 0))
-  (export "func f" (func 1))
-  (start 0)
-  (elem $0 declare func 1)
+  (export "func f" (func 2))
+  (start 1)
+  (elem $0 declare func 2)
 )
-12 : Int
+(i31 12) : Int
 val f : Int ->1 Int
 > 
 ```
@@ -97,6 +99,13 @@ make
 ```
 in the `waml` directory should produce a binary `waml` in that directory.
 
+The build now vendors the GC-enabled Wasm reference interpreter from
+`../ivo-node/gc/interpreter`. On the first run it executes
+`dune install --prefix vendor/wasm wasm` inside that directory and points
+`ocamlbuild` at the resulting findlib package via `OCAMLPATH`. Keep that
+repository checked out next to `wamlfx` (as in the upstream layout) or set
+`WASM_SRC_DIR` to wherever the interpreter lives before running `make`.
+
 
 ### Invocation
 
@@ -110,6 +119,23 @@ The `waml` binary is both compiler and REPL. For example:
 * `waml -c <file.waml>` compiles the file to `<file.wasm>`.
 
 See `waml -h` for further options.
+
+## Rust Prototype (JSON AST Workflow)
+
+A Rust workspace now lives alongside the OCaml implementation. Until the lexer/parser are ported, the Rust binary consumes pre-built ASTs serialized as JSON (matching the structures in `waml-ast`). Use Cargo to run the prototype:
+
+```
+cargo run -p waml -- --ast path/to/program.json
+```
+
+Key options:
+
+* `--ast <file>` – load a JSON AST from disk.
+* `--ast-json "<json>"` – inline a JSON string that describes the AST.
+* `--stdin-ast` – read the JSON AST from standard input.
+* `-c/--compile`, `-x/--show-wasm`, `-r/--run <file>` – mirror the OCaml flags so the eventual interpreter/compiler flows have the same surface area.
+
+At the moment the CLI validates/deserializes the AST, runs the nascent type checker, and then dispatches to placeholder interpreter/compiler hooks. The Rust type checker currently understands literals, tuples, `val` bindings, and simple `exp`/`assert` declarations (including detection of illegal tuple destructuring or arithmetic on non-ints); it reports structural mismatches using the shared `TypeError` machinery. For example, if a binding attempts to match a two-field tuple pattern against a one-field tuple expression, or applies integer addition to `Text` values, the CLI surfaces the error before any interpreter/compiler work runs. This keeps the JSON-AST workflow useful while the rest of the compiler is ported.
 
 Points of note:
 
@@ -431,23 +457,21 @@ The compiler makes use of the following constructs from the GC proposal.
 #### Types
 ```
 i8
-anyref  eqref  dataref  i31ref  (ref $t)  (ref null $t)  (rtt n $t)
+anyref  eqref  i31ref  (ref $t)  (ref null $t)
 struct  array
 ```
-(Currently unused is `i16`).
+(Currently unused is `i16`.)
 
 #### Instructions
 ```
 ref.eq
-ref.is_null  ref.as_non_null  ref.as_i31  ref.as_data  ref.cast
-br_on_data  br_on_cast
-i31.new  i31.get_u
+ref.as_non_null  ref.cast  ref.test
+ref.i31  i31.get_u  i31.get_s
 struct.new  struct.get  struct.get_u  struct.set
 array.new  array.new_default  array.get  array.get_u  array.set  array.len
-rtt.canon  rtt.sub
 ```
 
-(Currently unused are the remaining `ref.is_*`, `ref.as_*`, and `br_on_*` instructions, `ref.test`, the signed `*.get_s` instructions, and `struct.new_default`.)
+(Currently unused are the remaining `ref.is_*`, `ref.as_*`, and `br_on_*` instructions.)
 
 
 ### Value representations
@@ -476,7 +500,7 @@ Notably, all fields of tuples and the contents of ML type `ref` have to be repre
 
 The constructors of each date type are assigned numeric tags in alphabetical order. Their values are represented as either a `i31ref`, if the constructor has no arguments, or as a struct whose first field is the tag as an `i32`, and the remainder are the argument values.
 
-The actual constructors have a first-class representation as well. For an argumentless constructor, it is the `i31ref` value itself, for others it is the cached RTT used for the value.
+The actual constructors have a first-class representation as well. For an argumentless constructor, it is the `i31ref` value itself, for others it is a closure of the appropriate arity whose body allocates the tagged struct directly.
 
 Pattern matching against an argumentless constructor simply tests for reference equality. Matching against another constructor first tries downcast to its type and if successful, checks the tag field.
 
@@ -560,8 +584,8 @@ $codeVar = (func (param (ref $clos3) (ref $argv)) (result eqnnref))
 $argv = (array eqnnref)
 ...
 ```
-The compiler generate a suitable RTT hierarchy to enable appropriate casts for supporting [currying](#currying).
-For both type definitions and corresponding RTTs it is important that they are structural/canonical, in order for [separate compilation](#compilation-units) to work.
+The compiler generates canonical recursive type definitions so that `ref.cast` can target closure heap types directly when supporting [currying](#currying).
+Keeping these type definitions structural is important for [separate compilation](#compilation-units) to work.
 
 For example, the Waml function `f` in the following example,
 ```
@@ -573,20 +597,20 @@ val f x y = x + y + a + M.b
 has this Wasm representation:
 ```
 ;; Generic code and closure types for binary functions
-(type $code/2 (func (param (ref $clos/2) anyref anyref) (result anyref)))
-(type $clos/2 (struct (field i32 (ref $code/2))))
+(rec
+  (type $code/2 (sub (func (param (ref $clos/2) anyref anyref) (result anyref))))
+  (type $clos/2 (sub (struct (field i32) (field (ref $code/2)))))
+)
 
 ;; Closure type for f
-(type $clos/f (struct (field i32 (ref $code/2) i31ref (ref $M))))
-(global $rtt-clos/f ...)
+(type $clos/f (sub $clos/2 (struct (field i32) (field (ref $code/2)) i31ref (ref $M))))
 
 (func $f (param $clos (ref $clos/2)) (param $x anyref) (param $y anyref) (result anyref)
+  (local $tmp (ref null $clos/f))
   (local.get $clos)
-  (global.get $rtt-clos/f)
-  (rtt.cast)
-  (let (local $clos/f)
-    ;; actual body
-  )
+  (ref.cast (ref $clos/f))
+  (local.set $tmp)
+  ;; actual body, using fields of $tmp
 )
 ```
 

@@ -43,29 +43,29 @@ let sccs_of_subtypes (dta : W.sub_type array) : IntSet.t list =
     if x = y then ys' else scc x ys'
 
   and sub_type v = function
-    | W.SubType (xs, st) -> List.iter (var_type v) xs; str_type v st
+    | W.SubT (_, hts, st) -> List.iter (heap_type v) hts; str_type v st
 
   and str_type v = function
-    | W.StructDefType (W.StructType fts) -> List.iter (field_type v) fts
-    | W.ArrayDefType (W.ArrayType ft) -> field_type v ft
-    | W.FuncDefType (W.FuncType (vts1, vts2)) ->
+    | W.DefStructT (W.StructT fts) -> List.iter (field_type v) fts
+    | W.DefArrayT (W.ArrayT ft) -> field_type v ft
+    | W.DefFuncT (W.FuncT (vts1, vts2)) ->
       List.iter (value_type v) vts1; List.iter (value_type v) vts2
 
-  and field_type v (W.FieldType (st, _)) =
+  and field_type v (W.FieldT (_, st)) =
     match st with
-    | W.ValueStorageType vt -> value_type v vt
-    | W.PackedStorageType _ -> ()
+    | W.ValStorageT vt -> value_type v vt
+    | W.PackStorageT _ -> ()
 
   and value_type v = function
-    | W.RefType (_, ht) -> heap_type v ht
-    | W.NumType _ | W.VecType _ | W.BotType -> ()
+    | W.RefT (_, ht) -> heap_type v ht
+    | W.NumT _ | W.VecT _ | W.BotT -> ()
 
   and heap_type v = function
-    | W.DefHeapType x' | W.RttHeapType x' -> var_type v x'
+    | W.VarHT x' -> var_type v x'
     | _ -> ()
 
   and var_type v = function
-    | W.SynVar x' ->
+    | W.StatX x' ->
       let x = Int32.to_int x' in
       let w = info.(x) in
       if w.index = -1 then begin
@@ -73,7 +73,7 @@ let sccs_of_subtypes (dta : W.sub_type array) : IntSet.t list =
         v.low <- min v.low w.low
       end else if w.onstack then
         v.low <- min v.low w.index
-    | _ -> assert false
+    | W.RecX _ -> ()
   in
 
   for x = 0 to len - 1 do

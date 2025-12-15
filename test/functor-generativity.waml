@@ -1,0 +1,32 @@
+;; @FAIL-TYPECHECK: functor applications remain generative
+
+signature Box =
+{
+  type T
+  val zero : T
+  val step : T -> T
+  val view : T -> Int
+}
+
+module Functor (X : Box) =
+{
+  type Box = X.T
+  val new = X.zero
+  val bump x = X.step x
+  val reveal x = X.view x
+}
+
+module IntBox =
+  Functor { type T = Int; val zero = 0; val step x = x + 1; val view x = x }
+
+module BoolBox =
+  Functor
+  {
+    type T = Bool
+    val zero = True
+    val step b = if b then False else True
+    val view b = if b then 1 else 0
+  }
+;; When generativity is broken, this compiles but crashes at runtime because
+;; BoolBox.new produces a Bool and IntBox.bump expects an Int.
+val _ = IntBox.bump BoolBox.new

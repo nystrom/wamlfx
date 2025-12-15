@@ -480,6 +480,29 @@ let unpack x = function
   | s -> [], s
 
 
+(* Signature freshening *)
+
+let fresh_sig_id =
+  let counter = ref 0 in
+  fun base ->
+    incr counter;
+    base ^ "#" ^ string_of_int !counter
+
+let rename_bound bs =
+  if bs = [] then bs, empty_subst else
+  let bs' = List.map fresh_sig_id bs in
+  let su = typ_subst bs (List.map var bs') in
+  bs', su
+
+let rec freshen_sig = function
+  | Str (bs, str) ->
+    let bs', su = rename_bound bs in
+    Str (bs', subst_str su str)
+  | Fct (bs, s1, s2) ->
+    let bs', su = rename_bound bs in
+    Fct (bs', freshen_sig (subst_sig su s1), freshen_sig (subst_sig su s2))
+
+
 (* Matching *)
 
 exception Mismatch of string

@@ -7,28 +7,21 @@
 # Configuration
 
 NAME =		waml
-EXT =			$(NAME)
-UNOPT = 	$(NAME).debug
-OPT =   	$(NAME)
+EXT =		$(NAME)
+UNOPT =		$(NAME).debug
+OPT =		$(NAME)
 RUNTIME =	$(NAME)-runtime
 
-WASMBASE = ../../../interpreter
-WASMDIRS =	util syntax binary script text valid runtime exec host main
-WASMFILES = Makefile $(shell cd $(WASMBASE); ls $(foreach DIR,$(WASMDIRS),$(DIR)/*))
-
-WASMDIR =		_wasm
-WASMDEPS =	$(WASMFILES:%=$(WASMDIR)/%)
-
 WASMLINK =	wln
-WASMLINKDIR =	../$(WASMLINK)
+WASMLINK_BIN =	scripts/wln-link
 
 DIRS =		src
-LIBS =		bigarray wasm
-INCLS =		$(PWD)/_wasm/_build
-FLAGS = 	-lexflags -ml -cflags '-w +a-4-27-37-42-44-45 -warn-error +a-3'
-OCB =		ocamlbuild -verbose 8 $(FLAGS) $(DIRS:%=-I %) $(LIBS:%=-lib %) -cflags '$(INCLS:%=-I %)' -lflags '$(INCLS:%=-I %)'
+PKGS =		wasm unix
+FLAGS = 	-lexflags -ml -cflags '-w +a-4-27-37-42-44-45-70 -warn-error +a-3'
+OCB =		ocamlbuild -use-ocamlfind -no-hygiene -verbose 8 $(FLAGS) $(DIRS:%=-I %) $(PKGS:%=-pkg %)
 
 NODE =		node --experimental-wasm-gc
+WASM_BIN ?=	wasm
 
 
 # Main targets
@@ -42,41 +35,12 @@ unopt:		$(UNOPT)
 all:		unopt opt test
 
 
-# Mirroring Wasm
-
-.PHONY: wasm-deps
-wasm-deps: $(WASMDEPS)
-	@echo $(WASMDEPS)
-
-$(WASMDIR):
-		mkdir -p $@
-
-$(WASMDIRS:%=$(WASMDIR)/%): $(WASMDIR)/%:
-		mkdir -p $@
-
-$(WASMFILES:%=$(WASMDIR)/%): $(WASMDIR)/%: $(WASMBASE)/% $(WASMDIRS:%=$(WASMDIR)/%)
-		cp $< $@
-
-$(WASMDIR)/_build/wasm.cmx $(WASMDIR)/_build/wasm.cmxa: $(WASMDEPS)
-		make -C $(WASMDIR) libopt
-		touch $@
-		$(OCB) -clean
-
-$(WASMDIR)/_build/wasm.cmo $(WASMDIR)/_build/wasm.cma: $(WASMDEPS)
-		make -C $(WASMDIR) libunopt
-		touch $@
-		$(OCB) -clean
-
-$(WASMDIR)/wasm:	$(WASMDEPS)
-		make -C $(WASMDIR)
-
-
 # Building linker
 
 .PHONY:	$(WASMLINK)
 
 $(WASMLINK):
-		make -C $(WASMLINKDIR)
+		@true
 
 
 # Building executable
@@ -93,11 +57,11 @@ $(OPT):		main.native
 		mv $< $@
 
 .PHONY:		main.byte main.native
-main.byte: _tags $(WASMDIR)/_build/wasm.cma
-		$(OCB) -quiet $@
+main.byte: _tags
+	$(OCB) -quiet $@
 
-main.native: _tags $(WASMDIR)/_build/wasm.cmxa
-		$(OCB) -quiet $@
+main.native: _tags
+	$(OCB) -quiet $@
 
 
 # Executing test suite
@@ -126,19 +90,35 @@ titletest/%:	$(OPT)
 		@echo ==== $(@F) ====
 
 evaltest/%:		$(OPT)
-		@echo -n '$(@F).$(EXT)> '
-		@ ./$(NAME) -r $(shell grep "@FLAGS" $(TESTDIR)/$(@F).$(EXT) | sed 's/.*@FLAGS//g') $(TESTDIR)/$(@F).$(EXT)
+		@file=$(TESTDIR)/$(@F).$(EXT); \
+		flags="$(shell grep "@FLAGS" $(TESTDIR)/$(@F).$(EXT) | sed 's/.*@FLAGS//g')"; \
+		echo -n '$(@F).$(EXT)> '; \
+		if grep -q "@FAIL-TYPECHECK" $$file; then \
+		  if ./$(NAME) -r $$flags $$file; then \
+		    echo " ** expected type error"; exit 1; \
+		  fi; \
+		else \
+		  ./$(NAME) -r $$flags $$file; \
+		fi
 
 debugtest/%:	$(UNOPT)
-		@echo -n '$(@F).$(EXT)> '
-		@ ./$(NAME) -r $(shell grep "@FLAGS" $(TESTDIR)/$(@F).$(EXT) | sed 's/.*@FLAGS//g') $(TESTDIR)/$(@F).$(EXT)
+		@file=$(TESTDIR)/$(@F).$(EXT); \
+		flags="$(shell grep "@FLAGS" $(TESTDIR)/$(@F).$(EXT) | sed 's/.*@FLAGS//g')"; \
+		echo -n '$(@F).$(EXT)> '; \
+		if grep -q "@FAIL-TYPECHECK" $$file; then \
+		  if ./$(NAME) -r $$flags $$file; then \
+		    echo " ** expected type error"; exit 1; \
+		  fi; \
+		else \
+		  ./$(NAME) -r $$flags $$file; \
+		fi
 
 runtimetest:	$(OPT) titletest/Test-runtime
 		@./$(NAME) -v -g $(TESTDIR)/$(RUNTIME).wasm -g $(TESTDIR)/$(RUNTIME).wat
 		@make cleantest
 
 wasmtest/%:		$(OPT)
-	  @ if ! grep -q "@FAIL-WASM" $(TESTDIR)/$(@F).$(EXT); \
+	  @ if ! grep -q "@FAIL-WASM\|@FAIL-TYPECHECK" $(TESTDIR)/$(@F).$(EXT); \
 		  then \
 		    /bin/echo -n '$(@F).$(EXT)> '; \
 		    ./$(NAME) -r -c -v $(shell grep "@FLAGS" $(TESTDIR)/$(@F).$(EXT) | sed 's/.*@FLAGS//g') $(TESTDIR)/$(@F).$(EXT); \
@@ -146,7 +126,7 @@ wasmtest/%:		$(OPT)
 		fi
 
 wasmntest/%:	$(OPT)
-	  @ if ! grep -q "@FAIL-WASM" $(TESTDIR)/$(@F).$(EXT); \
+	  @ if ! grep -q "@FAIL-WASM\|@FAIL-TYPECHECK" $(TESTDIR)/$(@F).$(EXT); \
 		  then \
 		    /bin/echo -n '$(@F).$(EXT)> '; \
 		    ./$(NAME) -r -c -v -n $(shell grep "@FLAGS" $(TESTDIR)/$(@F).$(EXT) | sed 's/.*@FLAGS//g') $(TESTDIR)/$(@F).$(EXT); \
@@ -154,7 +134,7 @@ wasmntest/%:	$(OPT)
 		fi
 
 nodetest/%:		$(OPT)
-		@ if ! grep -q "@FAIL-WASM\|@FAIL-V8" $(TESTDIR)/$(@F).$(EXT); \
+		@ if ! grep -q "@FAIL-WASM\|@FAIL-V8\|@FAIL-TYPECHECK" $(TESTDIR)/$(@F).$(EXT); \
 		  then \
 		    echo $(@F).$(EXT); \
 		    ./$(NAME) -c -v $(shell grep "@FLAGS" $(TESTDIR)/$(@F).$(EXT) | sed 's/.*@FLAGS//g') $(TESTDIR)/$(@F).$(EXT); \
@@ -162,16 +142,18 @@ nodetest/%:		$(OPT)
 		  else echo '**' Skipping $(@F).$(EXT); \
 		fi
 
-linktest/%:		$(WASMDIR)/wasm $(WASMLINK) $(RUNTIME).wasm
+linktest/%:		$(WASMLINK) $(RUNTIME).wasm
 		@ if ! grep -q "@FAIL-LINK" $(TESTDIR)/$(@F).$(WASMLINK); \
 		  then \
 		    echo $(@F).$(WASMLINK); \
-		    for file in $$(cat $(TESTDIR)/$(@F).$(WASMLINK)); \
-		    do \
+		    inputs="$(RUNTIME).wasm"; \
+		    for file in $$(cat $(TESTDIR)/$(@F).$(WASMLINK)); do \
 		      ./$(NAME) -c -v $$file.$(EXT); \
+		      inputs="$$inputs $$file.wasm"; \
 		    done; \
-		    $(WASMLINKDIR)/$(WASMLINK) -v $(RUNTIME).wasm $$(cat $(TESTDIR)/$(@F).$(WASMLINK) | sed s/$$/.wasm/g) -o $(TESTDIR)/$(@F).wasm; \
-		    $(WASMDIR)/wasm $(TESTDIR)/$(@F).wasm; \
+		    output=$(TESTDIR)/$(@F).wast; \
+		    $(WASMLINK_BIN) $$inputs -o $$output; \
+		    $(WASM_BIN) -i $$output; \
 		  else echo '**' Skipping $(@F).$(WASMLINK); \
 		fi; \
 		# $(NODE) js/$(NAME).js $(TESTDIR)/$(@F)
@@ -185,8 +167,8 @@ $(RUNTIME).wasm:	$(OPT)
 .PHONY:		clean
 
 clean: cleantest
-		rm -rf $(WASMDIR) $(RUNTIME).wasm _tags
-		$(OCB) -clean
+	rm -rf $(RUNTIME).wasm _tags
+	$(OCB) -clean
 
 cleantest:
-		rm -f test/*.wasm test/*.wat
+	rm -f test/*.wasm test/*.wat test/*.wast
