@@ -29,6 +29,9 @@ def main():
 
                 if "waml-runtime" in basename:
                     f.write(f'(register "waml-runtime" {module_name})\n')
+                else:
+                    name = os.path.splitext(filename)[0]
+                    f.write(f'(register "{name}" {module_name})\n')
 
 if __name__ == "__main__":
     main()

@@ -40,7 +40,7 @@ let of_bool = function
 let to_bool = function
   | Con ("True", []) -> true
   | Con ("False", []) -> false
-  | _ -> assert false
+  | _ -> failwith "unreachable"
 
 let con x n =
   let rec f vs = function
@@ -54,7 +54,7 @@ let con x n =
 let fix xvs = function
   | Fun f -> Fun (fun _ -> f xvs)
   | Con _ as v -> v
-  | _ -> assert false
+  | _ -> failwith "unreachable"
 
 
 (* Comparison *)

@@ -48,9 +48,9 @@ let rec fun_flat ts t =
 
 let is_fun = function Fun _ -> true | _ -> false
 
-let as_tup = function Tup ts -> ts | _ -> assert false
-let as_fun = function Fun (t1, t2, a) -> t1, t2, a | _ -> assert false
-let as_data = function Data t -> t | _ -> assert false
+let as_tup = function Tup ts -> ts | _ -> failwith "unreachable"
+let as_fun = function Fun (t1, t2, a) -> t1, t2, a | _ -> failwith "unreachable"
+let as_data = function Data t -> t | _ -> failwith "unreachable"
 
 let rec as_fun_flat t = as_fun_flat' [] t
 and as_fun_flat' ts = function
@@ -61,8 +61,8 @@ and as_fun_flat' ts = function
 let as_poly (Forall (bs, t)) = bs, t
 let as_mono (Forall (_, t)) = t
 
-let as_str = function Str (bs, s) -> bs, s | _ -> assert false
-let as_fct = function Fct (bs, s1, s2) -> bs, s1, s2 | _ -> assert false
+let as_str = function Str (bs, s) -> bs, s | _ -> failwith "unreachable"
+let as_fct = function Fct (bs, s1, s2) -> bs, s1, s2 | _ -> failwith "unreachable"
 
 
 (* Printing *)
@@ -285,7 +285,7 @@ and subst_str su str =
 
 (* Equivalence *)
 
-let eq_sig = ref (fun _ -> assert false)
+let eq_sig = ref (fun _ -> failwith "unreachable")
 
 let rec eq t1 t2 =
   t1 == t2 ||
@@ -470,7 +470,7 @@ let pack bs s =
   match bs, s with
   | [], s -> s
   | bs, Str ([], str) -> Str (bs, str)
-  | _ -> assert false
+  | _ -> failwith "unreachable"
 
 let unpack x = function
   | Str (bs, str) ->
@@ -478,29 +478,6 @@ let unpack x = function
     let bs' = List.map (fun b -> fresh_for free (x ^ "." ^ b)) bs in
     bs', Str ([], subst_str (var_subst bs bs') str)
   | s -> [], s
-
-
-(* Signature freshening *)
-
-let fresh_sig_id =
-  let counter = ref 0 in
-  fun base ->
-    incr counter;
-    base ^ "#" ^ string_of_int !counter
-
-let rename_bound bs =
-  if bs = [] then bs, empty_subst else
-  let bs' = List.map fresh_sig_id bs in
-  let su = typ_subst bs (List.map var bs') in
-  bs', su
-
-let rec freshen_sig = function
-  | Str (bs, str) ->
-    let bs', su = rename_bound bs in
-    Str (bs', subst_str su str)
-  | Fct (bs, s1, s2) ->
-    let bs', su = rename_bound bs in
-    Fct (bs', freshen_sig (subst_sig su s1), freshen_sig (subst_sig su s2))
 
 
 (* Matching *)

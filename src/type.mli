@@ -103,6 +103,5 @@ val string_of_str : str -> string
 
 val pack : var list -> sig_ -> sig_
 val unpack : var -> sig_ -> var list * sig_
-val freshen_sig : sig_ -> sig_
 
 val sub : sig_ -> sig_ -> subst (* raises Mismatch *)

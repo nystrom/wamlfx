@@ -346,7 +346,7 @@ and check_exp' env e : T.typ =
     (try ignore (T.sub s1 s2) with T.Mismatch s ->
       error e.at "module does not match annotation, %s" s
     );
-    T.Pack (T.freshen_sig s2)
+    T.Pack s2  (* TODO: fresh names *)
 
   | LetE (ds, e1) ->
     let bs, env' = check_scope env ds in
@@ -399,11 +399,57 @@ and is_pure_dec d =
 
 and check_dec pass env d : T.typ * T.var list * env =
   assert (d.et = None);
-  let t, bs, env' = check_dec' pass env d in
+  let t, bs, env' =
+    match pass with
+    | FullPass -> check_dec_full env d
+    | RecPrePass -> check_dec_pre env d
+    | RecPass -> check_dec_rec env d
+  in
   if pass = FullPass then d.et <- Some (t, env');
   t, bs, env'
 
-and check_dec' pass env d : T.typ * T.var list * env =
+and check_val_dec_full env d p e =
+  let t1, env' = check_pat env p in
+  let t2 = check_exp env e in
+  unify t1 t2 d.at;
+  let env'' =
+    if not (is_pure e) then env' else E.map_vals (T.generalize env) env' in
+  T.Tup [], [], env''
+
+and check_val_dec_pre env _d p =
+  let _, env' = check_pat env p in
+  T.Tup [], [], env'
+
+and check_val_dec_rec env d p e =
+  let t1, env' = check_pat env p in
+  let t2 = check_exp env e in
+  unify t1 t2 d.at;
+  E.iter_vals (fun x t ->
+    unify (T.inst t.it) (T.inst (E.find_val (x @@ t.at) env).it) t.at
+  ) env';
+  T.Tup [], [], env'
+
+and check_dat_dec env include_typ include_cons y ys cs =
+  let b = y.it in
+  let bs = List.map it ys in
+  let t = T.Var (b, List.map T.var bs) in
+  let env' = E.extend_typs_var env ys in
+  let env1 =
+    if include_typ then E.singleton_typ y (T.Lambda (bs, t)) else E.empty
+  in
+  let env2 =
+    if not include_cons then E.empty else
+    List.fold_left (fun env2 c ->
+      let (x, ts) = c.it in
+      let ts' = List.map (check_typ env') ts in
+      let t' = List.fold_right (fun tI t' -> T.Fun (tI, t', ref T.VariableArity)) ts' t in
+      c.et <- Some t';
+      E.extend_val env2 x (T.Forall (bs, T.Data t'))
+    ) E.empty cs
+  in
+  T.Tup [], [b], E.adjoin env1 env2
+
+and check_dec_full env d =
   match d.it with
   | ExpD e ->
     let t = check_exp env e in
@@ -414,61 +460,15 @@ and check_dec' pass env d : T.typ * T.var list * env =
     unify t T.Bool e.at;
     T.Tup [], [], E.empty
 
-  | ValD (p, e) when pass = RecPrePass ->
-    let _, env' = check_pat env p in
-    T.Tup [], [], env'
-
-  | ValD (p, e) when pass = RecPass ->
-    let t1, env' = check_pat env p in
-    let t2 = check_exp env e in
-    unify t1 t2 d.at;
-    E.iter_vals (fun x t ->
-      unify (T.inst t.it) (T.inst (E.find_val (x @@ t.at) env).it) t.at
-    ) env';
-    T.Tup [], [], env'
-
   | ValD (p, e) ->
-    let t1, env' = check_pat env p in
-    let t2 = check_exp env e in
-    unify t1 t2 d.at;
-    let env'' =
-      if not (is_pure e) then env' else E.map_vals (T.generalize env) env' in
-    T.Tup [], [], env''
+    check_val_dec_full env d p e
 
   | TypD (y, ys, t) ->
     let t' = check_typ (E.extend_typs_var env ys) t in
     T.Tup [], [], E.singleton_typ y (T.Lambda (List.map it ys, t'))
 
   | DatD (y, ys, cs) ->
-    let b = y.it in
-    let bs = List.map it ys in
-    let t = T.Var (b, List.map T.var bs) in
-    let env' = E.extend_typs_var env ys in
-    let env1 =
-      if pass = RecPass then E.empty else
-      E.singleton_typ y (T.Lambda (bs, t))
-    in
-    let env2 =
-      if pass = RecPrePass then E.empty else
-      List.fold_left (fun env2 c ->
-        let (x, ts) = c.it in
-        let ts' = List.map (check_typ env') ts in
-        let arity = List.length ts' in
-        let rec make_fun idx ts t' =
-          match ts with
-          | [] -> t'
-          | tI::ts' ->
-            let arity_ref =
-              if idx = 0 then ref (T.KnownArity arity) else ref T.VariableArity
-            in
-            T.Fun (tI, make_fun (idx + 1) ts' t', arity_ref)
-        in
-        let t' = make_fun 0 ts' t in
-        c.et <- Some t';
-        E.extend_val env2 x (T.Forall (bs, T.Data t'))
-      ) E.empty cs
-    in
-    T.Tup [], [b], E.adjoin env1 env2
+    check_dat_dec env true true y ys cs
 
   | ModD (x, m) ->
     let bs, s = T.unpack x.it (check_mod env m) in
@@ -491,9 +491,32 @@ and check_dec' pass env d : T.typ * T.var list * env =
 
   | InclD m ->
     let s = check_mod env m in
-    match s with
+    (match s with
     | T.Str (bs, env') -> T.Tup [], bs, env'
     | _ -> error m.at "structure expected, but got %s" (T.string_of_sig s)
+    )
+
+and check_dec_pre env d =
+  match d.it with
+  | ValD (p, _) ->
+    check_val_dec_pre env d p
+
+  | DatD (y, ys, cs) ->
+    check_dat_dec env true false y ys cs
+
+  | _ ->
+    check_dec_full env d
+
+and check_dec_rec env d =
+  match d.it with
+  | ValD (p, e) ->
+    check_val_dec_rec env d p e
+
+  | DatD (y, ys, cs) ->
+    check_dat_dec env false true y ys cs
+
+  | _ ->
+    check_dec_full env d
 
 and check_decs pass env ds t : T.typ * T.var list * env =
   match ds with
@@ -513,11 +536,35 @@ and check_scope env ds : T.var list * env =
 
 and check_spec pass env s : T.var list * env =
   assert (s.et = None);
-  let bs, env' = check_spec' pass env s in
+  let bs, env' =
+    match pass with
+    | FullPass -> check_spec_full env s
+    | RecPrePass -> check_spec_pre env s
+    | RecPass -> check_spec_rec env s
+  in
   if pass = FullPass then s.et <- Some env';
   bs, env'
 
-and check_spec' pass env s : T.var list * env =
+and check_dat_spec env include_typ include_cons y ys cs =
+  let b = y.it in
+  let bs = List.map it ys in
+  let t = T.Var (b, List.map T.var bs) in
+  let env' = E.extend_typs_var env ys in
+  let env1 =
+    if include_typ then E.singleton_typ y (T.Lambda (bs, t)) else E.empty
+  in
+  let env2 =
+    if not include_cons then E.empty else
+    List.fold_left (fun env2 c ->
+      let (x, ts) = c.it in
+      let ts' = List.map (check_typ env') ts in
+      let t' = List.fold_right (fun tI t' -> T.Fun (tI, t', ref T.VariableArity)) ts' t in
+      E.extend_val env2 x (T.Forall (bs, T.Data t'))
+    ) E.empty cs
+  in
+  [b], E.adjoin env1 env2
+
+and check_spec_full env s =
   match s.it with
   | ValS (x, ys, t) ->
     let t' = check_typ (E.extend_typs_var env ys) t in
@@ -533,24 +580,7 @@ and check_spec' pass env s : T.var list * env =
     [b], E.singleton_typ y (T.Lambda (bs, T.Var (b, List.map T.var bs)))
 
   | DatS (y, ys, cs) ->
-    let b = y.it in
-    let bs = List.map it ys in
-    let t = T.Var (b, List.map T.var bs) in
-    let env' = E.extend_typs_var env ys in
-    let env1 =
-      if pass = RecPass then E.empty else
-      E.singleton_typ y (T.Lambda (bs, t))
-    in
-    let env2 =
-      if pass = RecPrePass then E.empty else
-      List.fold_left (fun env2 c ->
-        let (x, ts) = c.it in
-        let ts' = List.map (check_typ env') ts in
-        let t' = List.fold_right (fun tI t' -> T.Fun (tI, t', ref T.VariableArity)) ts' t in
-        E.extend_val env2 x (T.Forall (bs, T.Data t'))
-      ) E.empty cs
-    in
-    [b], E.adjoin env1 env2
+    check_dat_spec env true true y ys cs
 
   | ModS (x, s) ->
     let bs, s' = T.unpack x.it (check_sig env s) in
@@ -567,10 +597,27 @@ and check_spec' pass env s : T.var list * env =
 
   | InclS s ->
     let s' = check_sig env s in
-    match s' with
+    (match s' with
     | T.Str (bs, env') -> bs, env'
     | _ ->
       error s.at "structure signature expected, but got %s" (T.string_of_sig s')
+    )
+
+and check_spec_pre env s =
+  match s.it with
+  | DatS (y, ys, cs) ->
+    check_dat_spec env true false y ys cs
+
+  | _ ->
+    check_spec_full env s
+
+and check_spec_rec env s =
+  match s.it with
+  | DatS (y, ys, cs) ->
+    check_dat_spec env false true y ys cs
+
+  | _ ->
+    check_spec_full env s
 
 and check_specs pass env ss : T.var list * env =
   match ss with
@@ -651,7 +698,7 @@ and check_mod' env m : T.sig_ =
       let su = try T.sub s2 (T.pack bs s2') with T.Mismatch s ->
         error m.at "module does not match functor parameter signature, %s" s
       in
-      T.freshen_sig (T.subst_sig su s)
+      T.subst_sig su s  (* TODO: fresh names *)
     | _ -> error m1.at "functor expected but got %s" (T.string_of_sig s1)
     )
 
@@ -661,13 +708,13 @@ and check_mod' env m : T.sig_ =
     (try ignore (T.sub s1 s2) with T.Mismatch s ->
       error m.at "module does not match annotation, %s" s
     );
-    T.freshen_sig s2
+    s2  (* TODO: fresh names *)
 
   | UnpackM (e, s) ->
     let t1 = check_exp env e in
     let s2 = check_sig env s in
     unify t1 (T.Pack s2) e.at;
-    T.freshen_sig s2
+    s2  (* TODO: fresh names *)
 
   | LetM (ds, m) ->
     let bs, env' = check_scope env ds in

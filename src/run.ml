@@ -230,7 +230,7 @@ let exec wasm f =
   f inst;
   match Wasm.Instance.export inst (Wasm.Utf8.decode "return") with
   | Some (Wasm.Instance.ExternGlobal glob) ->
-    Printf.printf "%s" Wasm.(Values.string_of_value (Global.load glob))
+    Printf.printf "%s" Wasm.(Value.string_of_value (Global.load glob))
   | _ -> ()
 
 
@@ -332,14 +332,6 @@ let compile_string string file : bool =
 
 (* Registry hooks *)
 
-let wasm_is_current src wasm =
-  Sys.file_exists wasm &&
-  try
-    let wasm_stat = Unix.stat wasm in
-    let src_stat = Unix.stat src in
-    wasm_stat.Unix.st_mtime >= src_stat.Unix.st_mtime
-  with Unix.Unix_error _ -> false
-
 let load_file url at : entry =
   try
     if !Flags.prompt then
@@ -348,9 +340,8 @@ let load_file url at : entry =
     trace ("Loading import \"" ^ url ^ "\"...");
     let src_file = url ^ ".waml" in
     let wasm_file = url ^ ".wasm" in
-    let use_cached = !Flags.compile && wasm_is_current src_file wasm_file in
     let stat, dyn, wasm_opt =
-      if use_cached then begin
+      if !Flags.compile && Sys.file_exists wasm_file then begin
         let wasm, stat = read_binary_file wasm_file in
         stat, Env.empty, Some wasm
       end
